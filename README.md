@@ -8,7 +8,7 @@ behavior alone — then explain *why*, and tell someone what to do about it.
 ## Problem
 
 Insurance policies rarely cancel without warning. Way before a customer
-formally request cancellation of a policy, their payment behavior usually degrades first: a missed
+formally requests cancellation of a policy, their payment behavior usually degrades first: a missed
 invoice here, a failed card charge there, payments landing later each
 cycle. That signal exists in the data most insurers already have — but it
 typically isn't turned into anything actionable until the cancellation has
