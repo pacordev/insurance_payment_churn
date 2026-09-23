@@ -1,0 +1,25 @@
+# just spins up a local postgres for dev - nothing else runs in docker for now
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: churn_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: churn
+      POSTGRES_PASSWORD: churn
+      POSTGRES_DB: churn
+    ports:
+      - "5432:5432"
+    volumes:
+      # data survives container restarts
+      - churn_pgdata:/var/lib/postgresql/data
+      # runs once, only when the data volume is empty (fresh db)
+      - ./db/create_tables.sql:/docker-entrypoint-initdb.d/01_create_tables.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U churn -d churn"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  churn_pgdata:
