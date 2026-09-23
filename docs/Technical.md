@@ -139,10 +139,10 @@ generate_data.py --> syntethic_data/*.csv --> seed_db.py --> Postgres (raw table
 
 For an interactive version of this same diagram (pan/zoom, guided
 "training path" vs. "scoring path" views), see
-[`../diagrams/dataflow.html`](../diagrams/dataflow.html). The system
+the [data-flow diagram](https://pacordev.github.io/insurance_payment_churn/diagrams/dataflow.html). The system
 component view (Postgres, the Python modules, model artifacts, and where
 the retention team fits in) is at
-[`../diagrams/architecture.html`](../diagrams/architecture.html).
+the [architecture diagram](https://pacordev.github.io/insurance_payment_churn/diagrams/architecture.html).
 
 Training (`churn_trainer.py`/`evaluation.py`/`explain.py`'s standalone
 runs) always uses the **full** feature table, Cancelled policies
