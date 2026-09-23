@@ -6,3 +6,4 @@ models/
 .DS_Store
 *.egg-info/
 notes/
+docs/Code_Walkthrough.md

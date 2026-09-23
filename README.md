@@ -68,10 +68,9 @@ already persisted.
 
 For an interactive, more detailed view — component boundaries, and a
 data-flow diagram that makes the training-vs-scoring split explicit —
-open [`diagrams/architecture.html`](diagrams/architecture.html) and
-[`diagrams/dataflow.html`](diagrams/dataflow.html) in a browser
-(pan/zoom, theme toggle, and guided views included; GitHub won't render
-them inline, so download or clone to view).
+open the [architecture diagram](https://pacordev.github.io/insurance_payment_churn/diagrams/architecture.html)
+and the [data-flow diagram](https://pacordev.github.io/insurance_payment_churn/diagrams/dataflow.html)
+in your browser (pan/zoom, theme toggle, and guided views included).
 
 ## Screenshots
 
@@ -177,7 +176,3 @@ For setup and usage instructions, the full technical reference — schema,
 module-by-module breakdown, modeling methodology — and worked examples
 showing exactly how a policy's raw payment history becomes a risk score,
 see [`docs/Technical.md`](docs/Technical.md).
-
-New to the codebase, or teaching it to someone else? [`docs/Code_Walkthrough.md`](docs/Code_Walkthrough.md)
-is a script-by-script course covering what every function does and why —
-written to be read start to finish, with exercises.

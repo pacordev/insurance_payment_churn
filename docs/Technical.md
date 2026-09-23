@@ -5,11 +5,7 @@ responsibilities, modeling methodology, and worked examples showing
 exactly how a policy's raw payment history turns into a risk score and a
 recommendation.
 
-See [`../README.md`](../README.md) for the project overview. If you're
-learning this codebase from scratch,
-[`Code_Walkthrough.md`](Code_Walkthrough.md) teaches it script by script,
-in execution order, with exercises — this document is for looking things
-up, that one is for reading start to finish.
+See [`../README.md`](../README.md) for the project overview.
 
 ## Contents
 
@@ -34,8 +30,7 @@ up, that one is for reading start to finish.
 churn/
 ├── README.md                   # customer/portfolio-facing overview
 ├── docs/
-│   ├── Technical.md            # this file
-│   └── Code_Walkthrough.md     # script-by-script course, with exercises
+│   └── Technical.md            # this file
 ├── diagrams/
 │   ├── architecture.html       # interactive component diagram (archify)
 │   ├── architecture.png        # static screenshot, embedded in README.md
