@@ -42,24 +42,6 @@ decision:
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph Data
-        PG[(PostgreSQL)]
-    end
-
-    PG --> FE[Feature Engineering]
-    FE --> SEG[Segmentation<br/>KMeans]
-    FE --> MODEL[Model Training<br/>Random Forest]
-    MODEL --> EVAL[Evaluation<br/>cost-weighted threshold]
-    MODEL --> SHAP[Explainability<br/>SHAP]
-    SEG --> SCORE[Batch Scoring<br/>Active policies only]
-    SHAP --> SCORE
-    SCORE --> REC[Recommendation<br/>driver → action]
-    REC --> PG
-    PG --> REPORT[Excel Report]
-```
-
 ![Architecture diagram](diagrams/architecture.png)
 
 Everything downstream of scoring reads from Postgres — the report never
