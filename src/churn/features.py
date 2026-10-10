@@ -69,8 +69,10 @@ def summarize_payhistory_by_invoice(invoices: pd.DataFrame, payhistory: pd.DataF
     summary = invoices[["invoice_num", "policy_num", "installment_num"]].merge(
         per_invoice, on="invoice_num", how="left"
     )
-    summary["failed_attempts"] = summary["failed_attempts"].fillna(0).astype(int)
-    summary["was_paid_late"] = summary["was_paid_late"].fillna(False)
+    # invoices with no payment rows come out of the merge as NaN - turn them into
+    # plain 0 / False without pandas' silent downcasting in fillna
+    summary["failed_attempts"] = pd.to_numeric(summary["failed_attempts"]).fillna(0).astype(int)
+    summary["was_paid_late"] = summary["was_paid_late"].eq(True)
     summary["was_missed"] = ~summary["invoice_num"].isin(payhistory["invoice_num"])
     summary["had_failed_attempt"] = summary["failed_attempts"] > 0
     return summary
