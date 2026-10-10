@@ -12,6 +12,7 @@ See [`../README.md`](../README.md) for the project overview.
 - [Repository layout](#repository-layout)
 - [Database schema](#database-schema)
 - [Data flow](#data-flow)
+- [Generating the synthetic data](#generating-the-synthetic-data)
 - [Module reference](#module-reference)
 - [Feature engineering](#feature-engineering)
 - [Modeling methodology](#modeling-methodology)
@@ -30,20 +31,26 @@ See [`../README.md`](../README.md) for the project overview.
 churn/
 ├── README.md                   # customer/portfolio-facing overview
 ├── docs/
-│   └── Technical.md            # this file
+│   ├── Technical.md            # this file
+│   ├── Code_Walkthrough.md     # private code walkthrough (gitignored)
+│   └── risk_report_yyyymmdd.xlsx # sample report, linked from the README
 ├── diagrams/
 │   ├── architecture.html       # interactive component diagram (archify)
 │   ├── architecture.png        # static screenshot, embedded in README.md
-│   └── dataflow.html           # interactive data-flow diagram (archify)
-├── notes/                      # personal scratch notes (gitignored)
+│   ├── dataflow.html           # interactive data-flow diagram (archify)
+│   └── *.visual-check.json     # archify's render checks for the two diagrams
+├── notebooks/
+│   └── eda.py                  # quick EDA pass over the data in Postgres
+├── notes/                      # personal scratch notes + churn_plan.md (gitignored)
 ├── docker-compose.yml          # local Postgres
+├── .env.example                # DATABASE_URL template
 ├── pyproject.toml
 ├── db/
 │   ├── create_tables.sql       # schema, also the Postgres init script
 │   └── db_tables.xlsx          # original schema design spec
 ├── syntethic_data/
 │   ├── generate_data.py        # synthetic data generator
-│   ├── tbl_*.csv                # generated raw tables
+│   ├── tbl_*.csv                # generated raw tables (committed)
 │   └── policy_profile_debug.csv # hidden ground-truth profile (segmentation validation only)
 ├── src/churn/
 │   ├── churn_db.py              # engine/connection setup
@@ -56,8 +63,8 @@ churn/
 │   ├── recommend.py             # driver -> action / plain-language mapping
 │   ├── churn_predict.py         # batch scoring
 │   └── report.py                # Excel report generation
-├── models/                      # persisted model + report artifacts (gitignored)
-└── tests/                       # one file per module, no live DB required
+├── models/                      # persisted model, evaluation files, feature importance, daily reports (gitignored)
+└── tests/                       # one file per module (except churn_db and the generator), no live DB required
 ```
 
 ## Database schema
@@ -73,9 +80,9 @@ tbl_customer ──< tbl_policies ──< tbl_invoice ──< tbl_payhistory
 | Table | Key columns | Notes |
 |---|---|---|
 | `tbl_customer` | `customer_id` (PK) | name, tax ID |
-| `tbl_policies` | `policy_num` (PK), `customer_id` (FK) | `policy_status` ∈ {Active, Cancelled}, `cancel_date` (nullable), `effective_start_date`/`effective_end_date` |
-| `tbl_invoice` | `invoice_num` (PK), `policy_num` (FK) | one row per billing installment, `days_arrears_allowed` defines the grace window |
-| `tbl_payhistory` | `transaction_id` (PK), `invoice_num` (FK) | one row per payment *attempt* — an invoice can have several (e.g. a failed attempt followed by a successful retry) |
+| `tbl_policies` | `policy_num` (PK), `customer_id` (FK) | `insurance_product`, `payment_frequency`, `policy_status`, `cancel_date` (nullable), `effective_start_date`/`effective_end_date`. The generator writes `Active`, `Expired` or `Cancelled`; the live database was later relabeled to Active/Cancelled only (see [below](#batch-scoring-the-active-only-fix)) |
+| `tbl_invoice` | `invoice_num` (PK), `policy_num` (FK) | one row per billing installment, `days_arrears_allowed` (30/60/90) defines the grace window. Also has `invoice_type` and `premium`, which the features don't use |
+| `tbl_payhistory` | `transaction_id` (PK), `invoice_num` (FK) | one row per payment *attempt* — an invoice can have several (e.g. a `Failed` attempt followed by a `Paid` retry). Status is `Paid`, `Paid Late` or `Failed`; an invoice with no row at all was missed |
 | `tbl_policy_risk_score` | `(policy_num, scored_at)` composite PK | one row per policy per scoring run — see below |
 
 `tbl_policy_risk_score` is the only table added beyond the original
@@ -108,34 +115,35 @@ generate_data.py --> syntethic_data/*.csv --> seed_db.py --> Postgres (raw table
                                                                   │
                                                                   ▼
                                                           features.py (feature table)
-                                                          ┌───────┴───────┐
-                                                          ▼               ▼
-                                                  segmentation.py   churn_trainer.py
-                                                  (clusters)        (trains + persists model)
-                                                                          │
-                                                                          ▼
-                                                                    evaluation.py
-                                                                    (metrics, threshold)
-                                                                          │
-                                                                          ▼
-                                                                     explain.py
-                                                                    (SHAP values)
-                                                                          │
-                                                                          ▼
-                                                              churn_predict.py
-                                                     (filters to Active, scores, clusters,
-                                                      explains, recommends — one pass)
-                                                                          │
-                                                            ┌─────────────┴─────────────┐
-                                                            ▼                           ▼
-                                                 tbl_policy_risk_score            models/feature_importance.csv
-                                                            │
-                                                            ▼
-                                                       report.py
-                                                            │
-                                                            ▼
-                                              models/risk_report_YYYYMMDD.xlsx
+                                                          ┌───────┴───────────────┐
+                                                          ▼                       ▼
+                                                  segmentation.py          evaluation.py  (python -m churn.evaluation)
+                                                  (clusters, used          trains the random forest on an 80% split,
+                                                   again at scoring)       reports metrics + cost-weighted threshold,
+                                                          │                saves models/churn_model.joblib
+                                                          │                + evaluation_report.json / threshold_sweep.csv / calibration.csv
+                                                          │                       │
+                                                          │                       ▼
+                                                          │                 churn_predict.py
+                                                          │         (loads the saved model, filters to Active,
+                                                          └────────▶ scores, clusters, explains with explain.py,
+                                                                     recommends with recommend.py — one pass)
+                                                                              │
+                                                              ┌───────────────┴───────────────┐
+                                                              ▼                               ▼
+                                                   tbl_policy_risk_score          models/feature_importance.csv
+                                                              │
+                                                              ▼
+                                                         report.py
+                                                              │
+                                                              ▼
+                                                models/risk_report_YYYYMMDD.xlsx
 ```
+
+`churn_trainer.py` is the shared toolbox for the training side (pipeline
+builder, split, save/load), not a step you run on its own to get the
+production model. Its `__main__` only prints baseline logistic regression
+metrics and saves nothing.
 
 For an interactive version of this same diagram (pan/zoom, guided
 "training path" vs. "scoring path" views), see
@@ -150,6 +158,80 @@ included — the model needs both classes to learn from. Only
 `churn_predict.py`'s batch-scoring step filters to Active policies (see
 [below](#batch-scoring-the-active-only-fix)).
 
+## Generating the synthetic data
+
+All the data comes from one script, `syntethic_data/generate_data.py`
+(the folder name has a typo, but `seed_db.py` points at it, so it stays).
+Only dependency is `faker`, which `pip install -e ".[dev]"` already pulls in.
+
+```bash
+# from the repo root
+python syntethic_data/generate_data.py --customers 120 --seed 42 --out-dir syntethic_data
+python -m churn.seed_db
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--customers` | 120 | How many customers to create. Each gets 1-2 policies, so expect roughly 1.5x that in policies |
+| `--seed` | 42 | Seeds `random` and `Faker`, so the profile mix, dates and payment outcomes are repeatable |
+| `--out-dir` | `.` (current dir) | Where the CSVs are written. Created if it doesn't exist |
+
+**Watch the `--out-dir`.** The default is wherever you run the command
+from, but `seed_db.py` only reads from `syntethic_data/`. Run the script
+from the repo root without the flag and the CSVs land in the root, where
+the seed step never looks at them.
+
+**What it writes** (all into `--out-dir`):
+
+- `tbl_customer.csv`, `tbl_policies.csv`, `tbl_invoice.csv`,
+  `tbl_payhistory.csv` - the four raw tables, in FK order, loaded by `seed_db.py`
+- `policy_profile_debug.csv` - `policy_num -> hidden_profile`. This is
+  ground truth for checking the segmentation, and it is **not** loaded
+  into Postgres on purpose so it can't leak into the features
+
+**How the data is built.** Every customer is assigned a hidden profile
+(`good` / `at_risk` / `churned`, weighted 40/35/25). The profile drives
+everything downstream:
+
+1. Policies - 1-2 per customer, one year long. `churned` customers get a
+   `cancel_date` and status `Cancelled`; the rest are `Active` or `Expired`
+   depending on whether the end date has passed.
+2. Invoices - one every 30 x N days (N = 1 / 3 / 6 months for Monthly /
+   Quarterly / Semi-Annual) from the start date until a cutoff: the cancel
+   date for Cancelled policies, today for Active ones, the end date for
+   Expired ones. Each invoice gets a random 30/60/90 day arrears window.
+3. Payment history - each invoice is rolled against the profile's outcome
+   odds (on time / late / failed / missed). Missed means no row at all.
+   A failed attempt may get a successful retry a few days later. For
+   `churned` policies the odds shift as the policy moves from its first
+   invoice to its last: more missed and failed, fewer on-time, and a
+   lower retry rate. `good` and `at_risk` stay flat over time. That
+   drift is the signal the model is meant to find.
+
+Starting outcome odds per profile, for reference (they live in
+`PAYMENT_OUTCOMES`; the `churned` row is the starting point, it drifts as
+described above):
+
+| Profile | On time | Late | Failed | Missed |
+|---|---|---|---|---|
+| good | 0.90 | 0.07 | 0.02 | 0.01 |
+| at_risk | 0.55 | 0.22 | 0.15 | 0.08 |
+| churned | 0.25 | 0.18 | 0.32 | 0.25 |
+
+**Things worth knowing:**
+
+- Same seed does not mean identical files. IDs come from `uuid4`, which
+  the seed doesn't control, and dates are relative to today's date. The
+  shape is repeatable, the keys aren't. That is also why rerunning with
+  new data merges cleanly into Postgres instead of colliding.
+- `seed_db.py` is additive, but `generate_data.py` overwrites the CSVs
+  (including `policy_profile_debug.csv`) every run. After a few seed
+  rounds the database holds more policies than the debug file covers, so
+  the segmentation-vs-hidden-profile check only sees the latest batch
+  (`segmentation.py` prints how many policies matched).
+- To start completely fresh, recreate the Postgres volume
+  (`docker compose down -v`) before regenerating and seeding.
+
 ## Module reference
 
 ### `churn_db.py`
@@ -159,7 +241,8 @@ goes through `get_engine()`.
 
 ### `seed_db.py`
 Loads the four synthetic CSVs into Postgres. Idempotent by design —
-`ON CONFLICT DO NOTHING` on UUID primary keys, so regenerating more
+`ON CONFLICT DO NOTHING` on the primary keys (short random IDs built from
+`uuid4`, e.g. `POL-1C1CDD7E`), so regenerating more
 synthetic data and rerunning this script merges new rows in rather than
 duplicating. `upsert_dataframe()` is generic (works for any table via
 SQLAlchemy reflection) and is reused by `churn_predict.py` to write
@@ -180,9 +263,11 @@ Turns the four raw tables into one row per policy. Key steps:
    it eventually paid late, and how many days past
    `days_arrears_allowed` did the successful payment land.
 2. `aggregate_policy_features()` — collapses that to one row per policy:
-   counts/ratios of missed/failed/late invoices, average/max days late,
-   and a "trend delta" (recent-half rate minus early-half rate) for both
-   the failed rate and the late rate.
+   counts/ratios of missed/failed/late invoices (plus `total_invoices`
+   and the three `*_count` columns, which are kept in the table but not
+   fed to the model), average/max days late, and a "trend delta"
+   (recent-half rate minus early-half rate) for both the failed rate and
+   the late rate.
 3. `policy_static_features()` — tenure (`effective_end_date` minus
    `effective_start_date`, but `cancel_date` instead of
    `effective_end_date` for Cancelled policies) and the label
@@ -197,7 +282,7 @@ rejected the mixed-type column index outright until this was added.
 
 `BEHAVIOR_FEATURE_COLUMNS` — the canonical list of numeric features — is
 exported from here and imported everywhere else (training, segmentation,
-explainability) so nothing risks training on a different feature set than
+batch scoring) so nothing risks training on a different feature set than
 it explains.
 
 ### `segmentation.py`
@@ -211,20 +296,26 @@ fact, not fed back into how the clusters were formed.
 `policy_profile_debug.csv` — the `good`/`at_risk`/`churned` behavior
 profile `generate_data.py` assigned when *generating* the synthetic data,
 which never enters Postgres or the feature table. Adjusted Rand index on
-the full dataset: **0.294**, with the "High risk" cluster mapping almost
-entirely onto the hidden `churned` profile (26/26, zero false positives
-from `at_risk`/`good`).
+the policies the debug CSV covers (177 of the 370 policies at the last
+check, since the CSV only holds the latest generated batch): **0.294**,
+with the "High risk" cluster mapping entirely onto the hidden `churned`
+profile (26/26, zero false positives from `at_risk`/`good`).
+`python -m churn.segmentation` prints the match count and crosstab, so
+rerun it for current numbers.
 
 ### `churn_trainer.py`
 `build_pipeline()` bundles a `ColumnTransformer` (standardize the numeric
 features, one-hot encode `insurance_product`/`payment_frequency`) with a
 classifier — defaults to `class_weight="balanced"` logistic regression
 (churn is the minority class, ~24% of policies), or pass
-`build_random_forest_classifier()` to swap it for the random forest used
-in production. `split_feature_table()` centralizes the stratified 80/20
+`build_random_forest_classifier()` (200 trees, also class-balanced) to
+swap it for the random forest used in production. `split_feature_table()` centralizes the stratified 80/20
 train/test split so `evaluation.py` and this module always split
 identically. `save_pipeline()`/`load_pipeline()` persist via `joblib` to
-`models/churn_model.joblib` — the file the batch scorer loads.
+`models/churn_model.joblib` — the file the batch scorer loads. Running
+the module directly (`python -m churn.churn_trainer`) only prints the
+baseline logistic regression's precision/recall/ROC-AUC; the production
+model is saved by `python -m churn.evaluation`.
 
 ### `evaluation.py`
 Goes beyond accuracy: precision/recall/F1/ROC-AUC/PR-AUC, a confusion
@@ -232,9 +323,13 @@ matrix, a calibration table (predicted vs. observed churn rate by
 quantile bucket), and a full threshold sweep. `pick_cost_weighted_threshold()`
 picks whichever threshold minimizes
 `false_positives × cost_fp + false_negatives × cost_fn` rather than
-defaulting to 0.5 — see [Modeling methodology](#modeling-methodology) for
-the real numbers. `save_evaluation_report()` persists the result to
+defaulting to 0.5 (when several thresholds tie on cost, the lowest one
+wins) — see [Modeling methodology](#modeling-methodology) for the real
+numbers. `save_evaluation_report()` persists the result to
 `models/evaluation_report.json`/`threshold_sweep.csv`/`calibration.csv`.
+Run as a script it evaluates the random forest and also saves it as
+`models/churn_model.joblib`. That saved model was fit on the 80% training
+split only, not on all the data.
 
 ### `explain.py`
 `fit_random_forest()` trains the random forest on the same split as
@@ -266,11 +361,14 @@ Reads the latest `tbl_policy_risk_score` batch (joined with
 presentation. Two sheets: "Policy Detail" (one row per policy,
 color-coded by segment, autofiltered) and "Summary" (totals + two native
 Excel bar charts). Does no ML work itself by design — everything it shows
-was already computed by `churn_predict.py`.
+was already computed by `churn_predict.py`. It only reads `tbl_policy_risk_score`
+and `tbl_policies`, not `models/feature_importance.csv`.
 
 ## Feature engineering
 
-Per policy, as of the reference date:
+Per policy, built by `build_feature_table()`. The model uses the eight
+numeric columns plus the two categoricals; `invoice_type` and `premium`
+are ignored:
 
 | Feature | Definition |
 |---|---|
@@ -329,7 +427,7 @@ contributions. Two views:
 
 **Important interpretive note:** across the currently-Active population,
 `tenure_days` dominates the aggregate ranking (mean `|SHAP|` ≈ 0.31,
-roughly 3.5× the next feature) — but this is largely a constant-baseline
+roughly 3.6× the next feature, `missed_invoice_ratio` at ≈ 0.09) — but this is largely a constant-baseline
 effect, not genuine differentiation. Every policy's synthetic term is a
 fixed 365 days (`effective_end_date = effective_start_date + 365`), so
 every Active policy carries essentially the same `tenure_days` value and
@@ -365,7 +463,9 @@ Flagged" column.
 **A real limitation:** only the top 3 SHAP factors are stored per policy
 (`TOP_FACTORS_PER_POLICY` in `churn_predict.py`). If two drivers are
 similarly significant, the smaller one can occasionally be edged out of
-the top 3 by a lower-magnitude categorical feature — see
+the top 3 by a lower-magnitude categorical feature. And since
+`tenure_days` almost always ranks first by magnitude, it usually takes one
+of those three slots, leaving two for everything else — see
 [`POL-8C41550C`](#pol-8c41550c) below, where `failed_invoice_ratio` (tied
 at 0.33 with `missed_invoice_ratio`) didn't make the stored list.
 
@@ -393,6 +493,12 @@ def filter_active_policies(feature_table: pd.DataFrame) -> pd.DataFrame:
     return feature_table[feature_table["policy_status"] == "Active"].reset_index(drop=True)
 ```
 
+**What "at risk" means in the output:** the scorer writes the raw model
+probability and a segment label. It does not apply the cost-weighted
+threshold from `evaluation.py`. The report's "Flagged at risk" count is
+every policy whose segment is not "Low risk" (Medium + High), not
+everything above a probability cutoff.
+
 **A related data note:** the synthetic generator's fixed historical date
 window meant most non-churned policies had already run past their
 365-day term and were labeled `Expired`, functionally identical to
@@ -401,7 +507,8 @@ distinction). To give the corrected pipeline a realistic book to work
 with, all 245 `Expired` policies were relabeled `Active` directly in
 Postgres (status column only — no dates touched, so no behavior feature
 is affected). Live counts went from 245 Expired / 88 Cancelled / 37
-Active to 0 / 88 / **282** Active.
+Active to 0 / 88 / **282** Active. (Those counts are a snapshot from the
+live database at the time; this file doesn't query it.)
 
 ## Worked examples
 
@@ -495,10 +602,10 @@ this is the clearest-cut case of the four.
 ## Development setup & usage
 
 ```bash
-docker compose up -d              # Postgres on localhost:5432
+docker compose up -d              # Postgres on localhost:5432 (needs Python 3.14+ for the rest)
 pip install -e ".[dev]"           # project + pytest/faker
 cp .env.example .env              # adjust DATABASE_URL if needed
-python syntethic_data/generate_data.py --customers 120 --seed 42
+python syntethic_data/generate_data.py --customers 120 --seed 42 --out-dir syntethic_data
 python -m churn.seed_db
 pytest                            # 60 tests, no live DB required
 ```
@@ -509,6 +616,11 @@ idempotent (`ON CONFLICT DO NOTHING` on UUID keys) rather than a one-time
 bootstrap, since growing the synthetic dataset over time is the expected
 workflow for this project.
 
+The container only runs `db/create_tables.sql` when its data volume is
+empty. If you change the schema later, apply the DDL by hand to the
+running container (or `docker compose down -v` and start over, which
+wipes the data).
+
 To train, evaluate, score, and report from scratch:
 
 ```bash
@@ -516,6 +628,11 @@ python -m churn.evaluation      # trains, evaluates, persists the model
 python -m churn.churn_predict   # scores Active policies, writes to Postgres
 python -m churn.report          # generates the dated Excel report
 ```
+
+Optional extras: `python -m churn.features` (prints the feature table),
+`python -m churn.segmentation` (clusters vs. the hidden profile),
+`python -m churn.explain` (SHAP on the held-out split) and
+`python notebooks/eda.py` (quick EDA).
 
 That last step produces `models/risk_report_YYYYMMDD.xlsx` — open it
 directly, no server involved.
