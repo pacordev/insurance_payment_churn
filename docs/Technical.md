@@ -602,7 +602,7 @@ this is the clearest-cut case of the four.
 ## Development setup & usage
 
 ```bash
-docker compose up -d              # Postgres on localhost:5432 (needs Python 3.14+ for the rest)
+docker compose up -d              # Postgres on localhost:5433 (needs Python 3.14+ for the rest)
 pip install -e ".[dev]"           # project + pytest/faker
 cp .env.example .env              # adjust DATABASE_URL if needed
 python syntethic_data/generate_data.py --customers 120 --seed 42 --out-dir syntethic_data
