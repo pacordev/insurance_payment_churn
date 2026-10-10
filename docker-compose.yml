@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: churn
       POSTGRES_DB: churn
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       # data survives container restarts
       - churn_pgdata:/var/lib/postgresql/data

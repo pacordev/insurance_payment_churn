@@ -18,7 +18,7 @@ from sqlalchemy.engine import Engine
 load_dotenv()
 
 # matches the defaults in docker-compose.yml, used if no env var is set
-DEFAULT_DATABASE_URL = "postgresql+psycopg://churn:churn@localhost:5432/churn"
+DEFAULT_DATABASE_URL = "postgresql+psycopg://churn:churn@localhost:5433/churn"
 
 
 def get_database_url() -> str:
