@@ -90,8 +90,10 @@ and the bar charts.
 - **Two models compared** — a logistic regression baseline and a random
   forest, chosen for both accuracy and explainability
 - **Decision-focused evaluation** — precision/recall/ROC-AUC/PR-AUC,
-  calibration, and a threshold picked by weighing false-positive vs.
-  false-negative business cost, not a default 0.5
+  calibration, and a suggested threshold worked out by weighing
+  false-positive vs. false-negative business cost instead of defaulting
+  to 0.5. The report itself flags policies by risk segment, not by that
+  cutoff
 - **SHAP explainability**, per-policy and aggregate
 - **Automatic recommendations** — each policy's top actionable driver maps
   to a plain-language suggested action
@@ -113,6 +115,22 @@ and the bar charts.
 | Model persistence | joblib | Saves the trained model to disk so scoring doesn't need retraining |
 | Reporting | openpyxl | Builds the Excel risk report with scores, segments and suggested actions |
 | Testing | pytest | Checks each pipeline stage with small synthetic datasets |
+
+## Sample data
+
+There's no real customer data here. A small script,
+`syntethic_data/generate_data.py`, makes it up: customers, policies,
+invoices and payment history. Some customers pay fine, some slip a bit,
+and some get worse and worse until they cancel. That slow slide is what
+the model learns to spot.
+
+```bash
+python syntethic_data/generate_data.py --customers 120 --seed 42 --out-dir syntethic_data
+python -m churn.seed_db      # loads the CSVs into Postgres
+```
+
+You can run it again with a different seed to add more data. The exact
+flags and how the data is built are in [docs/Technical.md](docs/Technical.md#generating-the-synthetic-data).
 
 ## Testing
 
