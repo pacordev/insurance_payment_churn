@@ -56,7 +56,7 @@ in your browser (pan/zoom, theme toggle, and guided views included).
 
 ## Screenshots
 
-There's no hosted app to screenshot — the deliverable is a workbook you
+The resultant report is an excel file that you
 open locally. Here's what it actually contains, straight from a real run
 against the seeded dataset (282 active policies):
 
@@ -102,17 +102,17 @@ and the bar charts.
 
 ## Technology
 
-| Layer | Choice |
-|---|---|
-| Database | PostgreSQL 16 (Docker) |
-| Language | Python 3.14 |
-| DB access | SQLAlchemy + psycopg |
-| Data/features | pandas, numpy |
-| Modeling | scikit-learn (LogisticRegression, RandomForestClassifier) |
-| Explainability | SHAP |
-| Model persistence | joblib |
-| Reporting | openpyxl |
-| Testing | pytest |
+| Layer | Choice | What it does |
+|---|---|---|
+| Database | PostgreSQL 16 (Docker) | Stores customers, policies, invoices and payment history, plus the risk scores each batch produces |
+| Language | Python 3.14 | Runs the whole pipeline, from loading data to the final report |
+| DB access | SQLAlchemy + psycopg | Lets the Python code read from and write to Postgres |
+| Data/features | pandas, numpy | Turns raw payment history into one row of behavior features per policy |
+| Modeling | scikit-learn (LogisticRegression, RandomForestClassifier) | Trains the models that predict which policies are likely to cancel |
+| Explainability | SHAP | Shows which payment behaviors pushed each policy's risk up or down |
+| Model persistence | joblib | Saves the trained model to disk so scoring doesn't need retraining |
+| Reporting | openpyxl | Builds the Excel risk report with scores, segments and suggested actions |
+| Testing | pytest | Checks each pipeline stage with small synthetic datasets |
 
 ## Testing
 
